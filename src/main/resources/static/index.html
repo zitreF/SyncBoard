@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SyncBoard</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="home">
+  <main class="card panel">
+    <h1>SyncBoard</h1>
+    <p class="lead">A whiteboard you can draw on together. Create a board, send the link, and everyone sees each other's
+      strokes and cursors live.</p>
+
+    <form id="create" class="create">
+      <label for="code">Join code <span class="hint">(optional, 4 to 32 characters)</span></label>
+      <input id="code" type="text" minlength="4" maxlength="32" autocomplete="off" placeholder="Leave empty for an open board">
+      <button class="primary">Create a board</button>
+      <p id="error" class="error" role="alert"></p>
+    </form>
+  </main>
+
+  <script type="module" src="/js/home.js"></script>
+</body>
+</html>

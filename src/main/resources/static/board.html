@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SyncBoard</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="board">
+  <canvas id="canvas" aria-label="Whiteboard"></canvas>
+  <div id="cursors" class="cursors" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand panel">
+      <a href="/">SyncBoard</a>
+      <span id="room-id" class="room-id"></span>
+      <span id="locked" class="locked" title="Joining needs a code" hidden>locked</span>
+    </div>
+
+    <div class="toolbar panel" role="toolbar" aria-label="Drawing tools">
+      <div class="group">
+        <button class="swatch" data-color="#1e1e1e" aria-label="Black" aria-pressed="true"></button>
+        <button class="swatch" data-color="#e03131" aria-label="Red" aria-pressed="false"></button>
+        <button class="swatch" data-color="#1971c2" aria-label="Blue" aria-pressed="false"></button>
+        <button class="swatch" data-color="#2f9e44" aria-label="Green" aria-pressed="false"></button>
+        <button class="swatch" data-color="#f08c00" aria-label="Orange" aria-pressed="false"></button>
+      </div>
+      <span class="divider"></span>
+      <div class="group">
+        <button class="width" data-width="2" aria-label="Thin" aria-pressed="false"><span></span></button>
+        <button class="width" data-width="4" aria-label="Medium" aria-pressed="true"><span></span></button>
+        <button class="width" data-width="8" aria-label="Thick" aria-pressed="false"><span></span></button>
+      </div>
+      <span class="divider"></span>
+      <div class="group">
+        <button id="undo" class="tool" aria-label="Undo" title="Undo your last stroke (Ctrl+Z)">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+        </button>
+        <button id="clear" class="tool" aria-label="Clear the board" title="Clear the board for everyone">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5"/></svg>
+        </button>
+      </div>
+      <span class="divider"></span>
+      <button id="share" class="share">Copy link</button>
+    </div>
+
+    <div class="presence panel">
+      <div id="people" class="people" aria-label="People on this board"></div>
+      <span class="divider"></span>
+      <div id="status" class="status" data-state="connecting" role="status">Connecting</div>
+    </div>
+  </header>
+
+  <div id="toast" class="toast panel" role="status" hidden></div>
+
+  <dialog id="join" class="dialog">
+    <form id="join-form">
+      <h2>Join the board</h2>
+      <label for="name">Your name</label>
+      <input id="name" maxlength="30" required autocomplete="nickname">
+      <div id="code-field" hidden>
+        <label for="code">Join code</label>
+        <input id="code" type="password" maxlength="32" autocomplete="off">
+      </div>
+      <p id="join-error" class="error" role="alert"></p>
+      <button class="primary">Join</button>
+    </form>
+  </dialog>
+
+  <div id="gone" class="gone panel" hidden>
+    <p id="gone-text"></p>
+    <a class="primary" href="/">Create a new board</a>
+  </div>
+
+  <script type="module" src="/js/board.js"></script>
+</body>
+</html>
