@@ -4,7 +4,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,7 +103,7 @@ public class Room {
     }
 
     public List<Stroke> strokes() {
-        return new ArrayList<>(strokes.values());
+        return strokes.values().stream().map(Stroke::copy).toList();
     }
 
     boolean isIdle(Instant now, Duration timeout) {

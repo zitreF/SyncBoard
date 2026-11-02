@@ -108,7 +108,8 @@ GitHub Actions runs the same build on every push.
 
 ```
 src/main/java/me/fertiz/syncboard
-    room/       Room, Stroke, Member, RoomService (creating and expiring rooms), RoomController (REST)
+    api/        RoomController (REST) and its request and response objects
+    room/       Room, Stroke, Member, RoomService (creating and expiring rooms)
     socket/     BoardSocketHandler, the messages in both directions, WebSocket config
 src/main/resources/static
     index.html  home page,  board.html  the board

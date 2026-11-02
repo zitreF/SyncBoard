@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RoomTest {
 
@@ -30,6 +31,18 @@ class RoomTest {
         room.draw("s1", "#1e1e1e", 2, new int[]{3, 3});
 
         assertThat(room.strokes()).extracting(Stroke::id).containsExactly("s1", "s2");
+    }
+
+    @Test
+    void handsOutCopiesThatCannotChangeTheRoom() {
+        room.draw("s1", "#1e1e1e", 2, new int[]{1, 1});
+        List<Stroke> copy = room.strokes();
+
+        assertThatThrownBy(() -> copy.get(0).points().add(9)).isInstanceOf(UnsupportedOperationException.class);
+        room.draw("s1", "#1e1e1e", 2, new int[]{2, 2});
+
+        assertThat(copy.get(0).points()).containsExactly(1, 1);
+        assertThat(room.strokes().get(0).points()).containsExactly(1, 1, 2, 2);
     }
 
     @Test

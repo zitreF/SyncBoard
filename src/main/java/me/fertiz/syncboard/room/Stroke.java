@@ -9,6 +9,10 @@ public record Stroke(String id, String color, int width, List<Integer> points) {
         return new Stroke(id, color, width, new ArrayList<>());
     }
 
+    Stroke copy() {
+        return new Stroke(id, color, width, List.copyOf(points));
+    }
+
     void append(int[] coordinates) {
         for (int coordinate : coordinates) {
             points.add(coordinate);

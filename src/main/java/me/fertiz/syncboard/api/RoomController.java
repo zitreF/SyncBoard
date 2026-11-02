@@ -1,5 +1,6 @@
-package me.fertiz.syncboard.room;
+package me.fertiz.syncboard.api;
 
+import me.fertiz.syncboard.room.RoomService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,18 +14,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/rooms")
 public class RoomController {
 
-    static final int MIN_CODE_LENGTH = 4;
-    static final int MAX_CODE_LENGTH = 32;
-
-    public record CreateRoom(String code) {}
-
-    public record RoomInfo(String id, boolean locked) {
-
-        static RoomInfo of(Room room) {
-            return new RoomInfo(room.id(), room.isLocked());
-        }
-    }
-
     private final RoomService rooms;
 
     public RoomController(RoomService rooms) {
@@ -32,18 +21,18 @@ public class RoomController {
     }
 
     @PostMapping
-    public ResponseEntity<RoomInfo> create(@RequestBody(required = false) CreateRoom request) {
-        String code = request == null || request.code() == null || request.code().isBlank() ? null : request.code().strip();
-        if (code != null && (code.length() < MIN_CODE_LENGTH || code.length() > MAX_CODE_LENGTH)) {
+    public ResponseEntity<RoomResponse> create(@RequestBody(required = false) CreateRoomRequest request) {
+        String code = request == null ? null : request.normalizedCode();
+        if (!CreateRoomRequest.isValidCode(code)) {
             return ResponseEntity.badRequest().build();
         }
         return rooms.create(code)
-                .map(room -> ResponseEntity.status(HttpStatus.CREATED).body(RoomInfo.of(room)))
+                .map(room -> ResponseEntity.status(HttpStatus.CREATED).body(RoomResponse.from(room)))
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build());
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<RoomInfo> find(@PathVariable String id) {
-        return ResponseEntity.of(rooms.find(id).map(RoomInfo::of));
+    public ResponseEntity<RoomResponse> find(@PathVariable String id) {
+        return ResponseEntity.of(rooms.find(id).map(RoomResponse::from));
     }
 }
