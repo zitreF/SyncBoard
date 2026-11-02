@@ -1,37 +1,72 @@
 # SyncBoard
 
+[![Build](https://github.com/zitreF/syncboard/actions/workflows/build.yml/badge.svg)](https://github.com/zitreF/syncboard/actions/workflows/build.yml)
+
 A small real-time whiteboard. Create a board, send the link to friends (optionally protected with a join code) and
 draw together: everyone sees the others' strokes and cursors as they happen.
 
-Spring Boot 4 with a plain WebSocket endpoint on the server, and a vanilla JavaScript canvas page with no build step.
+![Three people on one board: Ola and Kuba's cursors with their names, the list of people and the toolbar](docs/board.png)
+
+## Features
+
+- **Boards with a link.** One click creates a board with a short random id, for example `/r/s8i3eck9`. Anyone with the
+  link can join.
+- **Optional join code.** A board can be locked with a code of 4 to 32 characters. Without it the server refuses to
+  let anyone in.
+- **Live drawing.** Five colors, three widths. Others see a line grow while it is being drawn, not only after the
+  mouse is released.
+- **Live cursors and people.** Everyone's cursor moves on the board with their name next to it, and the top right
+  corner shows who is on the board.
+- **Undo and clear.** `Ctrl+Z` removes your own last stroke, the trash icon clears the board for everyone.
+- **Late joiners and reconnects.** Someone who joins later gets everything drawn so far. A page that loses the
+  connection reconnects on its own and gets the current board again.
+
+<p>
+  <img src="docs/home.png" width="49%" alt="Home page: create a board with an optional join code">
+  <img src="docs/join.png" width="49%" alt="Joining a locked board: name and join code">
+</p>
 
 ## Running
+
+Java 25 is the only requirement. Gradle comes with the wrapper.
 
 ```bash
 ./gradlew bootRun
 ```
 
-Open http://localhost:8080, create a board and open its link in another tab or browser. Java 25 is the only
-requirement.
+Open http://localhost:8080, create a board and open its link in another tab or browser. To build a single jar and run
+it on another port:
 
-| Key / button   | Action                               |
-|----------------|--------------------------------------|
-| `Ctrl+Z`       | Undo your last stroke                |
-| Trash icon     | Clear the board for everyone         |
-| Copy link      | Copy the board's link to share       |
+```bash
+./gradlew bootJar
+PORT=9000 java -jar build/libs/syncboard.jar
+```
+
+Settings in `src/main/resources/application.yml`:
+
+| Setting                       | Default | Meaning                                         |
+|-------------------------------|---------|-------------------------------------------------|
+| `server.port` (env `PORT`)    | `8080`  | HTTP and WebSocket port                         |
+| `syncboard.max-rooms`         | `1000`  | how many boards may exist at the same time      |
+| `syncboard.room-idle-timeout` | `30m`   | how long an empty board is kept before removal  |
+| `syncboard.cleanup-interval`  | `1m`    | how often empty boards are looked for           |
 
 ## How it works
 
-1. `POST /api/rooms` creates a room with a random 8-character id and an optional join code (4 to 32 characters).
+The server is a Spring Boot app with one REST controller and one WebSocket handler (`TextWebSocketHandler`, no STOMP).
+The page is plain HTML, CSS and JavaScript served by the same app, drawn on a `<canvas>`, with no framework and no
+build step.
+
+1. `POST /api/rooms` creates a room with a random 8-character id and an optional join code.
    `GET /api/rooms/{id}` tells the page whether the room exists and whether it needs a code.
 2. The page opens a WebSocket to `/ws/rooms/{id}` and sends `join` with a name and the code. The server answers with
-   `welcome`: everything drawn so far and who is on the board. A wrong code closes the socket with `4403`, an unknown
-   room with `4404`.
-3. While you draw, new points go out every 40 ms as `draw` messages with the stroke's id. The server appends them to
-   the stroke and passes them on, so others see the line grow live. A late joiner gets the whole strokes in `welcome`.
-4. `erase` (undo) and `clear` work the same way. Cursor positions are only passed on, never stored.
+   `welcome`: everything drawn so far and who is on the board.
+3. While you draw, the page collects points and sends the new ones every 40 ms as a `draw` message with the stroke's
+   id. The server appends them to the stroke and passes them on to everyone else.
+4. `erase` (undo) and `clear` work the same way. Cursor positions are sent at most every 40 ms and are only passed
+   on, never stored.
 
-| Client → server                   | Server → client                                  |
+| Page → server                     | Server → page                                    |
 |-----------------------------------|--------------------------------------------------|
 | `join {name, code}`               | `welcome {you, members, strokes}`                |
 | `draw {id, color, width, points}` | `draw`, `erase`, `clear {by}` from the others    |
@@ -39,27 +74,49 @@ requirement.
 | `cursor {x, y}`                   | `cursor {member, x, y}`                          |
 |                                   | `notice {message}`, e.g. when the board is full  |
 
-Some details:
+When something is wrong the server closes the socket with a code the page understands: `4403` wrong join code,
+`4404` no such board, `4409` board full (20 people), `4400` a message that breaks the rules.
 
-- Each room has one lock, and a change is sent to everyone while it is held, so all clients see changes in the same
-  order as the server.
-- Every connection is wrapped in Spring's `ConcurrentWebSocketSessionDecorator`, so one slow client cannot hold up a
-  room: a client more than 5 seconds or 1 MB behind is disconnected.
-- Rooms live in memory. A room that has been empty for 30 minutes is removed.
-- Everything a client sends is checked: colors, widths, coordinates, ids, at most 10 000 strokes per board and 20
-  people per room. Names are cleaned on the server and only ever put on the page as text.
-- The page reconnects on its own after a dropped connection and gets the current board again.
+A few decisions worth knowing:
+
+- **One lock per room.** A change and sending it to everyone happen while the room's lock is held, so every page sees
+  the changes in the same order as the server. Different rooms never wait for each other.
+- **Slow clients do not hold up others.** Every connection is wrapped in Spring's
+  `ConcurrentWebSocketSessionDecorator`. A client more than 5 seconds or 1 MB behind is disconnected instead of
+  blocking the room.
+- **Nothing from the client is trusted.** Colors, widths, coordinates and ids are checked, a board holds at most
+  10 000 strokes, and names are cleaned on the server and only ever put on the page as text.
+- **Boards live in memory.** That keeps the project small. The trade-off: restarting the server empties every board,
+  and one instance is the limit.
 
 ## Tests
 
-`./gradlew build` runs them: unit tests for rooms and message validation, and integration tests that start the app and
-talk to it with real WebSocket clients (JDK `HttpClient`): two people drawing, a late joiner, undo and clear, members
-and cursors, join codes, unknown rooms and malformed messages.
+```bash
+./gradlew build
+```
 
-## Layout
+- `RoomTest`, `RoomServiceTest`: strokes, undo and clear, join codes, member colors, limits, name cleaning and
+  removing empty boards (with a fake clock).
+- `ClientMessageTest`: which `draw` and `cursor` messages are accepted.
+- `BoardSocketTest`: starts the app on a random port and talks to it with real WebSocket clients (JDK `HttpClient`):
+  two people drawing, a late joiner, undo and clear, members and cursors, locked boards, unknown boards and malformed
+  messages.
+
+GitHub Actions runs the same build on every push.
+
+## Project layout
 
 ```
-src/main/java/me/fertiz/syncboard/room     rooms, strokes, members and the REST endpoint
-src/main/java/me/fertiz/syncboard/socket   WebSocket handler and messages
-src/main/resources/static                  the pages: HTML, CSS and JavaScript
+src/main/java/me/fertiz/syncboard
+    room/       Room, Stroke, Member, RoomService (creating and expiring rooms), RoomController (REST)
+    socket/     BoardSocketHandler, the messages in both directions, WebSocket config
+src/main/resources/static
+    index.html  home page,  board.html  the board
+    js/         home.js, board.js (drawing, sync, cursors), storage.js
+    css/        style.css
 ```
+
+## Stack
+
+Java 25, Spring Boot 4.1 (Web MVC, WebSocket), Jackson, JUnit and AssertJ, plain JavaScript with Canvas 2D, Gradle
+with the Kotlin DSL.
