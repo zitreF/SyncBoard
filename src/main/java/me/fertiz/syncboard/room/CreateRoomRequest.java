@@ -1,4 +1,4 @@
-package me.fertiz.syncboard.api;
+package me.fertiz.syncboard.room;
 
 public record CreateRoomRequest(String code) {
 

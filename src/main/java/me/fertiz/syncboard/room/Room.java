@@ -8,6 +8,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 public class Room {
 
@@ -22,6 +26,7 @@ public class Room {
     private final byte[] code;
     private final Map<String, Stroke> strokes = new LinkedHashMap<>();
     private final Map<String, Member> members = new LinkedHashMap<>();
+    private final ExecutorService tasks;
     private int joined;
     private Instant lastActive;
     private boolean closed;
@@ -30,13 +35,22 @@ public class Room {
         this.id = id;
         this.code = code == null ? null : code.getBytes(StandardCharsets.UTF_8);
         this.lastActive = now;
+        this.tasks = Executors.newSingleThreadExecutor(Thread.ofVirtual().name("room-" + id).factory());
+    }
+
+    public CompletableFuture<Void> execute(Runnable task) {
+        try {
+            return CompletableFuture.runAsync(task, tasks);
+        } catch (RejectedExecutionException e) {
+            return CompletableFuture.failedFuture(e);
+        }
     }
 
     public String id() {
         return id;
     }
 
-    public boolean isLocked() {
+    boolean isLocked() {
         return code != null;
     }
 
@@ -112,6 +126,7 @@ public class Room {
 
     void close() {
         closed = true;
+        tasks.shutdown();
     }
 
     private String freeColor() {

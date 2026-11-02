@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -54,16 +55,16 @@ public class RoomService {
     @Scheduled(fixedDelayString = "${syncboard.cleanup-interval}")
     public void removeIdleRooms() {
         Instant now = clock.instant();
-        rooms.values().removeIf(room -> {
-            synchronized (room) {
-                if (!room.isIdle(now, idleTimeout)) {
-                    return false;
-                }
-                room.close();
-                LOGGER.info("Removed idle room {}", room.id());
-                return true;
-            }
-        });
+        CompletableFuture.allOf(rooms.values().stream()
+                .map(room -> room.execute(() -> removeIfIdle(room, now)))
+                .toArray(CompletableFuture[]::new)).join();
+    }
+
+    private void removeIfIdle(Room room, Instant now) {
+        if (room.isIdle(now, idleTimeout) && rooms.remove(room.id(), room)) {
+            room.close();
+            LOGGER.info("Removed idle room {}", room.id());
+        }
     }
 
     private String randomId() {

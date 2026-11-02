@@ -1,6 +1,5 @@
-package me.fertiz.syncboard.api;
+package me.fertiz.syncboard.room;
 
-import me.fertiz.syncboard.room.RoomService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;

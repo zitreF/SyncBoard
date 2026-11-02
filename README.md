@@ -75,15 +75,18 @@ build step.
 |                                   | `notice {message}`, e.g. when the board is full  |
 
 When something is wrong the server closes the socket with a code the page understands: `4403` wrong join code,
-`4404` no such board, `4409` board full (20 people), `4400` a message that breaks the rules.
+`4404` no such board, `4409` board full (20 people), `4400` a message that breaks the rules. A client that falls too
+far behind gets `1013` and the page simply reconnects.
 
 A few decisions worth knowing:
 
-- **One lock per room.** A change and sending it to everyone happen while the room's lock is held, so every page sees
-  the changes in the same order as the server. Different rooms never wait for each other.
-- **Slow clients do not hold up others.** Every connection is wrapped in Spring's
-  `ConcurrentWebSocketSessionDecorator`. A client more than 5 seconds or 1 MB behind is disconnected instead of
-  blocking the room.
+- **One queue per room, no locks.** Each room has its own task queue worked off by a single virtual thread
+  (`Room.execute`). The WebSocket handler never touches a room directly, it only queues work for it, so a room's state
+  is only ever changed by one thread and needs no `synchronized` or `Lock`. Changes and the messages about them go out
+  in queue order, so every page sees them in the same order as the server. Rooms never wait for each other.
+- **One outbox per connection.** The room thread does not write to sockets itself: it drops each message into the
+  connection's `Outbox`, a bounded queue with its own virtual thread. A client whose connection stalls cannot hold up
+  its room; once it is 1000 messages behind it is disconnected.
 - **Nothing from the client is trusted.** Colors, widths, coordinates and ids are checked, a board holds at most
   10 000 strokes, and names are cleaned on the server and only ever put on the page as text.
 - **Boards live in memory.** That keeps the project small. The trade-off: restarting the server empties every board,
@@ -95,9 +98,11 @@ A few decisions worth knowing:
 ./gradlew build
 ```
 
-- `RoomTest`, `RoomServiceTest`: strokes, undo and clear, join codes, member colors, limits, name cleaning and
-  removing empty boards (with a fake clock).
+- `RoomTest`, `RoomServiceTest`: strokes, undo and clear, join codes, member colors, limits, name cleaning,
+  removing empty boards (with a fake clock), and the room queue: tasks run in order on one thread, and 20 people
+  drawing into one stroke at the same time lose no points.
 - `ClientMessageTest`: which `draw` and `cursor` messages are accepted.
+- `OutboxTest`: messages go out in order, and a stalled client is closed without making the room wait.
 - `BoardSocketTest`: starts the app on a random port and talks to it with real WebSocket clients (JDK `HttpClient`):
   two people drawing, a late joiner, undo and clear, members and cursors, locked boards, unknown boards and malformed
   messages.
@@ -108,9 +113,9 @@ GitHub Actions runs the same build on every push.
 
 ```
 src/main/java/me/fertiz/syncboard
-    api/        RoomController (REST) and its request and response objects
-    room/       Room, Stroke, Member, RoomService (creating and expiring rooms)
-    socket/     BoardSocketHandler, the messages in both directions, WebSocket config
+    room/       Room, Stroke, Member, RoomService (creating and expiring rooms),
+                RoomController (REST) with CreateRoomRequest and RoomResponse
+    socket/     BoardSocketHandler, Outbox, the messages in both directions, WebSocket config
 src/main/resources/static
     index.html  home page,  board.html  the board
     js/         home.js, board.js (drawing, sync, cursors), storage.js

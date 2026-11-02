@@ -1,6 +1,4 @@
-package me.fertiz.syncboard.api;
-
-import me.fertiz.syncboard.room.Room;
+package me.fertiz.syncboard.room;
 
 public record RoomResponse(String id, boolean locked) {
 

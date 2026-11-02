@@ -4,7 +4,15 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -15,6 +23,48 @@ class RoomTest {
     private static final Duration TIMEOUT = Duration.ofMinutes(30);
 
     private final Room room = new Room("abcd2345", null, NOW);
+
+    @Test
+    void runsItsTasksOneAfterAnotherOnOneThread() {
+        List<Integer> order = new ArrayList<>();
+        Set<Thread> threads = ConcurrentHashMap.newKeySet();
+
+        CompletableFuture.allOf(IntStream.range(0, 200)
+                .mapToObj(i -> room.execute(() -> {
+                    order.add(i);
+                    threads.add(Thread.currentThread());
+                }))
+                .toArray(CompletableFuture[]::new)).join();
+
+        assertThat(order).containsExactlyElementsOf(IntStream.range(0, 200).boxed().toList());
+        assertThat(threads).hasSize(1).doesNotContain(Thread.currentThread());
+    }
+
+    @Test
+    void keepsEveryPointWhenManyPeopleDrawAtOnce() {
+        List<CompletableFuture<Void>> draws = new CopyOnWriteArrayList<>();
+        try (ExecutorService people = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int person = 0; person < 20; person++) {
+                people.submit(() -> {
+                    for (int i = 0; i < 100; i++) {
+                        int[] point = {i, i};
+                        draws.add(room.execute(() -> room.draw("shared", "#1e1e1e", 2, point)));
+                    }
+                });
+            }
+        }
+
+        CompletableFuture.allOf(draws.toArray(CompletableFuture[]::new)).join();
+
+        assertThat(room.strokes()).singleElement().satisfies(stroke -> assertThat(stroke.points()).hasSize(4000));
+    }
+
+    @Test
+    void refusesTasksOnceClosed() {
+        room.close();
+
+        assertThat(room.execute(() -> room.clear())).isCompletedExceptionally();
+    }
 
     @Test
     void appendsPointsToAStrokeAndKeepsItsFirstStyle() {
