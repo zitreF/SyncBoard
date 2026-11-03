@@ -1,4 +1,4 @@
-package me.fertiz.syncboard.socket;
+package me.fertiz.syncboard.board;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

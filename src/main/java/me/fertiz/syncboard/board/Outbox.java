@@ -1,4 +1,4 @@
-package me.fertiz.syncboard.socket;
+package me.fertiz.syncboard.board;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

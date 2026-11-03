@@ -1,4 +1,4 @@
-package me.fertiz.syncboard.socket;
+package me.fertiz.syncboard.board.message;
 
 import org.junit.jupiter.api.Test;
 

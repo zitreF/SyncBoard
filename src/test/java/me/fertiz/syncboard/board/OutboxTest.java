@@ -1,4 +1,4 @@
-package me.fertiz.syncboard.socket;
+package me.fertiz.syncboard.board;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

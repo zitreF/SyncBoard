@@ -1,5 +1,7 @@
-package me.fertiz.syncboard.socket;
+package me.fertiz.syncboard.board;
 
+import me.fertiz.syncboard.board.message.ClientMessage;
+import me.fertiz.syncboard.board.message.ServerMessage;
 import me.fertiz.syncboard.room.Member;
 import me.fertiz.syncboard.room.Room;
 import me.fertiz.syncboard.room.RoomService;

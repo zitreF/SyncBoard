@@ -111,16 +111,30 @@ GitHub Actions runs the same build on every push.
 
 ## Project layout
 
+The code is organised by feature: each top-level package is one thing the app does, and holds everything that thing
+needs, from the model to the endpoint. A new feature gets its own package next to these.
+
 ```
 src/main/java/me/fertiz/syncboard
-    room/       Room, Stroke, Member, RoomService (creating and expiring rooms),
-                RoomController (REST) with CreateRoomRequest and RoomResponse
-    socket/     BoardSocketHandler, Outbox, the messages in both directions, WebSocket config
+    SyncBoardApplication        starts the app
+    room/                       rooms: creating, finding and expiring them, their strokes and members
+        dto/                    what the REST API takes and returns (CreateRoomRequest, RoomResponse)
+        Room, Member, Stroke    the state of one room
+        RoomService             keeps all rooms, removes empty ones
+        RoomController          POST /api/rooms, GET /api/rooms/{id}
+        RoomPageController      serves the board page at /r/{id}
+    board/                      drawing together live over WebSocket
+        message/                what the page and the server send each other (ClientMessage, ServerMessage)
+        BoardSocketHandler      joins people to rooms and passes changes on
+        Outbox                  one send queue per connection
+        SocketConfig            registers /ws/rooms/{id}
 src/main/resources/static
-    index.html  home page,  board.html  the board
-    js/         home.js, board.js (drawing, sync, cursors), storage.js
-    css/        style.css
+    index.html, board.html      the home page and the board
+    js/                         home.js, board.js (drawing, sync, cursors), storage.js
+    css/                        style.css
 ```
+
+Tests use the same packages. `BoardSocketTest` in the root package starts the whole app.
 
 ## Stack
 
