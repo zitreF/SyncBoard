@@ -2,76 +2,62 @@ package me.fertiz.syncboard.room;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.security.SecureRandom;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class RoomService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RoomService.class);
-    private static final String ID_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789";
-    private static final int ID_LENGTH = 8;
 
-    private final Map<String, Room> rooms = new ConcurrentHashMap<>();
-    private final SecureRandom random = new SecureRandom();
+    private final RoomRepository repository;
+    private final RoomIdGenerator ids;
+    private final RoomProperties properties;
     private final InstantSource clock;
-    private final Duration idleTimeout;
-    private final int maxRooms;
 
-    public RoomService(InstantSource clock,
-                       @Value("${syncboard.room-idle-timeout}") Duration idleTimeout,
-                       @Value("${syncboard.max-rooms}") int maxRooms) {
+    public RoomService(RoomRepository repository, RoomIdGenerator ids, RoomProperties properties, InstantSource clock) {
+        this.repository = repository;
+        this.ids = ids;
+        this.properties = properties;
         this.clock = clock;
-        this.idleTimeout = idleTimeout;
-        this.maxRooms = maxRooms;
     }
 
     public Optional<Room> create(String code) {
-        if (rooms.size() >= maxRooms) {
+        if (repository.count() >= properties.maxRooms()) {
             return Optional.empty();
         }
-        Room room;
-        do {
-            room = new Room(randomId(), code, clock.instant());
-        } while (rooms.putIfAbsent(room.id(), room) != null);
+        Room room = new Room(ids.next(), code, clock.instant());
+        while (!repository.saveIfAbsent(room)) {
+            room = new Room(ids.next(), code, clock.instant());
+        }
         LOGGER.info("Created room {}{}", room.id(), room.isLocked() ? " with a join code" : "");
         return Optional.of(room);
     }
 
     public Optional<Room> find(String id) {
-        return Optional.ofNullable(rooms.get(id));
+        return repository.findById(id);
     }
 
     @Scheduled(fixedDelayString = "${syncboard.cleanup-interval}")
     public void removeIdleRooms() {
         Instant now = clock.instant();
-        CompletableFuture.allOf(rooms.values().stream()
-                .map(room -> room.execute(() -> removeIfIdle(room, now)))
-                .toArray(CompletableFuture[]::new)).join();
+        CompletableFuture<?>[] removals = repository.findAll().stream()
+                .map(room -> removeIfIdle(room, now))
+                .toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(removals).join();
     }
 
-    private void removeIfIdle(Room room, Instant now) {
-        if (room.isIdle(now, idleTimeout) && rooms.remove(room.id(), room)) {
-            room.close();
-            LOGGER.info("Removed idle room {}", room.id());
-        }
-    }
-
-    private String randomId() {
-        StringBuilder id = new StringBuilder(ID_LENGTH);
-        for (int i = 0; i < ID_LENGTH; i++) {
-            id.append(ID_ALPHABET.charAt(random.nextInt(ID_ALPHABET.length())));
-        }
-        return id.toString();
+    private CompletableFuture<Void> removeIfIdle(Room room, Instant now) {
+        return room.closeIfIdle(now, properties.roomIdleTimeout()).thenAccept(closed -> {
+            if (closed) {
+                repository.deleteById(room.id());
+                LOGGER.info("Removed idle room {}", room.id());
+            }
+        });
     }
 }

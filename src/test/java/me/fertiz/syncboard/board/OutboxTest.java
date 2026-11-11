@@ -3,7 +3,6 @@ package me.fertiz.syncboard.board;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
-import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -24,7 +23,7 @@ class OutboxTest {
     private final WebSocketSession session = mock(WebSocketSession.class);
 
     @BeforeEach
-    void name() {
+    void setUp() {
         when(session.getId()).thenReturn("session-1");
     }
 
@@ -34,13 +33,13 @@ class OutboxTest {
 
         outbox.send("a");
         outbox.send("b");
-        outbox.close(CloseStatus.NORMAL);
+        outbox.close(CloseReason.BAD_MESSAGE);
 
-        verify(session, timeout(2000)).close(CloseStatus.NORMAL);
+        verify(session, timeout(2000)).close(CloseReason.BAD_MESSAGE.status());
         InOrder order = inOrder(session);
         order.verify(session).sendMessage(new TextMessage("a"));
         order.verify(session).sendMessage(new TextMessage("b"));
-        order.verify(session).close(CloseStatus.NORMAL);
+        order.verify(session).close(CloseReason.BAD_MESSAGE.status());
         outbox.stop();
     }
 
@@ -63,7 +62,7 @@ class OutboxTest {
         }
 
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
-        verify(session, timeout(2000)).close(Outbox.TOO_SLOW);
+        verify(session, timeout(2000)).close(CloseReason.TOO_SLOW.status());
         stalled.countDown();
     }
 }

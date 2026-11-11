@@ -1,7 +1,7 @@
 package me.fertiz.syncboard.room;
 
-import me.fertiz.syncboard.room.dto.CreateRoomRequest;
-import me.fertiz.syncboard.room.dto.RoomResponse;
+import me.fertiz.syncboard.room.dto.request.CreateRoomRequest;
+import me.fertiz.syncboard.room.dto.response.RoomResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,22 +22,18 @@ public class RoomController {
     }
 
     @PostMapping
-    public ResponseEntity<RoomResponse> create(@RequestBody(required = false) CreateRoomRequest request) {
-        String code = request == null ? null : request.normalizedCode();
-        if (!CreateRoomRequest.isValidCode(code)) {
+    public ResponseEntity<RoomResponse> create(@RequestBody CreateRoomRequest request) {
+        if (!request.isValid()) {
             return ResponseEntity.badRequest().build();
         }
-        return rooms.create(code)
-                .map(room -> ResponseEntity.status(HttpStatus.CREATED).body(toResponse(room)))
+        return rooms.create(request.code())
+                .map(RoomResponse::from)
+                .map(room -> ResponseEntity.status(HttpStatus.CREATED).body(room))
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build());
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<RoomResponse> find(@PathVariable String id) {
-        return ResponseEntity.of(rooms.find(id).map(RoomController::toResponse));
-    }
-
-    private static RoomResponse toResponse(Room room) {
-        return new RoomResponse(room.id(), room.isLocked());
+        return ResponseEntity.of(rooms.find(id).map(RoomResponse::from));
     }
 }

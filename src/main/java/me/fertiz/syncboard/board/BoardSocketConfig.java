@@ -9,13 +9,13 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 
 @Configuration
 @EnableWebSocket
-public class SocketConfig implements WebSocketConfigurer {
+public class BoardSocketConfig implements WebSocketConfigurer {
 
     private static final int MAX_MESSAGE_SIZE = 64 * 1024;
 
     private final BoardSocketHandler handler;
 
-    public SocketConfig(BoardSocketHandler handler) {
+    public BoardSocketConfig(BoardSocketHandler handler) {
         this.handler = handler;
     }
 
@@ -25,7 +25,7 @@ public class SocketConfig implements WebSocketConfigurer {
     }
 
     @Bean
-    ServletServerContainerFactoryBean webSocketContainer() {
+    public ServletServerContainerFactoryBean webSocketContainer() {
         ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
         container.setMaxTextMessageBufferSize(MAX_MESSAGE_SIZE);
         return container;

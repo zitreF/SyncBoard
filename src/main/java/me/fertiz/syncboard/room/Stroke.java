@@ -1,21 +1,48 @@
 package me.fertiz.syncboard.room;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
 
-public record Stroke(String id, String color, int width, List<Integer> points) {
+public final class Stroke {
 
-    static Stroke start(String id, String color, int width) {
-        return new Stroke(id, color, width, new ArrayList<>());
+    private final String id;
+    private final String color;
+    private final int width;
+    private final int[] points;
+
+    private Stroke(String id, String color, int width, int[] points) {
+        this.id = id;
+        this.color = color;
+        this.width = width;
+        this.points = points;
     }
 
-    Stroke copy() {
-        return new Stroke(id, color, width, List.copyOf(points));
+    public static Stroke start(String id, String color, int width, int[] points) {
+        return new Stroke(id, color, width, points.clone());
     }
 
-    void append(int[] coordinates) {
-        for (int coordinate : coordinates) {
-            points.add(coordinate);
-        }
+    public Stroke extendedBy(int[] added) {
+        int[] extended = Arrays.copyOf(points, points.length + added.length);
+        System.arraycopy(added, 0, extended, points.length, added.length);
+        return new Stroke(id, color, width, extended);
+    }
+
+    public String id() {
+        return id;
+    }
+
+    public String color() {
+        return color;
+    }
+
+    public int width() {
+        return width;
+    }
+
+    public int coordinateCount() {
+        return points.length;
+    }
+
+    public int[] points() {
+        return points.clone();
     }
 }

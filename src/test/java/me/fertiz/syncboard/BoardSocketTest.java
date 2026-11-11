@@ -165,6 +165,10 @@ class BoardSocketTest {
             assertThat(client.closeCode()).isEqualTo(4400);
         }
         try (TestClient client = TestClient.join(port, room, "Alice")) {
+            client.sendRaw("null");
+            assertThat(client.closeCode()).isEqualTo(4400);
+        }
+        try (TestClient client = TestClient.join(port, room, "Alice")) {
             client.draw("s1", "red", 2, 1, 1);
             assertThat(client.closeCode()).isEqualTo(4400);
         }
@@ -182,6 +186,14 @@ class BoardSocketTest {
         HttpResponse<String> board = get("/r/" + room);
         assertThat(board.statusCode()).isEqualTo(200);
         assertThat(board.body()).contains("/js/board.js");
+    }
+
+    @Test
+    void tellsTheBrowserToCheckForNewerScripts() throws Exception {
+        HttpResponse<String> script = get("/js/board.js");
+
+        assertThat(script.statusCode()).isEqualTo(200);
+        assertThat(script.headers().firstValue("Cache-Control")).contains("no-cache");
     }
 
     private String createRoom(String code) throws IOException, InterruptedException {

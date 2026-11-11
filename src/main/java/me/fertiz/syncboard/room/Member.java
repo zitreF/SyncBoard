@@ -4,20 +4,26 @@ import java.util.regex.Pattern;
 
 public record Member(String id, String name, String color) {
 
-    static final int MAX_NAME_LENGTH = 30;
+    public static final int MAX_NAME_LENGTH = 30;
+    public static final String DEFAULT_NAME = "Guest";
 
+    private static final Pattern INVISIBLE = Pattern.compile("[\\p{Cc}\\p{Cf}&&[^\\s]]");
     private static final Pattern WHITESPACE = Pattern.compile("[\\p{Z}\\s]+");
-    private static final Pattern INVISIBLE = Pattern.compile("[\\p{Cc}\\p{Cf}]");
 
-    static String cleanName(String name) {
+    public static String cleanName(String name) {
         if (name == null) {
-            return "Guest";
+            return DEFAULT_NAME;
         }
-        String spaced = WHITESPACE.matcher(name).replaceAll(" ");
-        String clean = INVISIBLE.matcher(spaced).replaceAll("").replaceAll(" {2,}", " ").strip();
-        if (clean.codePointCount(0, clean.length()) > MAX_NAME_LENGTH) {
-            clean = clean.substring(0, clean.offsetByCodePoints(0, MAX_NAME_LENGTH)).strip();
+        String visible = INVISIBLE.matcher(name).replaceAll("");
+        String spaced = WHITESPACE.matcher(visible).replaceAll(" ").strip();
+        String clean = shortened(spaced);
+        return clean.isEmpty() ? DEFAULT_NAME : clean;
+    }
+
+    private static String shortened(String name) {
+        if (name.codePointCount(0, name.length()) <= MAX_NAME_LENGTH) {
+            return name;
         }
-        return clean.isEmpty() ? "Guest" : clean;
+        return name.substring(0, name.offsetByCodePoints(0, MAX_NAME_LENGTH)).strip();
     }
 }

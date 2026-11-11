@@ -75,22 +75,30 @@ build step.
 |                                   | `notice {message}`, e.g. when the board is full  |
 
 When something is wrong the server closes the socket with a code the page understands: `4403` wrong join code,
-`4404` no such board, `4409` board full (20 people), `4400` a message that breaks the rules. A client that falls too
-far behind gets `1013` and the page simply reconnects.
+`4404` no such board (also one that has expired), `4409` board full (20 people), `4400` a message that breaks the
+rules. A client that falls too far behind gets `1013` and the page simply reconnects.
 
 A few decisions worth knowing:
 
-- **One queue per room, no locks.** Each room has its own task queue worked off by a single virtual thread
-  (`Room.execute`). The WebSocket handler never touches a room directly, it only queues work for it, so a room's state
-  is only ever changed by one thread and needs no `synchronized` or `Lock`. Changes and the messages about them go out
-  in queue order, so every page sees them in the same order as the server. Rooms never wait for each other.
+- **One queue per room, no locks.** Each room has its own task queue worked off by a single virtual thread. The
+  state of a room (its `Drawing` and `RoomMembers`) can only be reached inside that queue, through
+  `Room.execute(state -> ...)`, so it is only ever changed by one thread and needs no `synchronized` or `Lock`.
+  Changes and the messages about them go out in queue order, so every page sees them in the same order as the server.
+  Rooms never wait for each other.
 - **One outbox per connection.** The room thread does not write to sockets itself: it drops each message into the
   connection's `Outbox`, a bounded queue with its own virtual thread. A client whose connection stalls cannot hold up
   its room; once it is 1000 messages behind it is disconnected.
-- **Nothing from the client is trusted.** Colors, widths, coordinates and ids are checked, a board holds at most
-  10 000 strokes, and names are cleaned on the server and only ever put on the page as text.
+- **Nothing from the client is trusted.** Colors, widths, coordinates and ids are checked, and names are cleaned on the
+  server and only ever put on the page as text. A board holds at most 10 000 strokes and 200 000 coordinates, so one
+  person cannot fill the server's memory; when it is full the page says so.
+- **Cheap on the hot path.** A stroke keeps its points in a plain `int[]`, a message is turned into JSON once however
+  many people get it, and the page draws only the new piece of a line instead of repainting the whole board. It
+  repaints everything only when the order of strokes could change: undo, clear, resize.
 - **Boards live in memory.** That keeps the project small. The trade-off: restarting the server empties every board,
   and one instance is the limit.
+
+What it does not do: the join code is a simple lock for a board shared among friends, not real access control. There
+are no accounts and no limit on how often someone may guess a code, create boards or move a cursor.
 
 ## Tests
 
@@ -98,40 +106,65 @@ A few decisions worth knowing:
 ./gradlew build
 ```
 
-- `RoomTest`, `RoomServiceTest`: strokes, undo and clear, join codes, member colors, limits, name cleaning,
-  removing empty boards (with a fake clock), and the room queue: tasks run in order on one thread, and 20 people
-  drawing into one stroke at the same time lose no points.
-- `ClientMessageTest`: which `draw` and `cursor` messages are accepted.
+- `DrawingTest`, `StrokeTest`: strokes, undo and clear, and the limits of one board.
+- `RoomMembersTest`, `MemberTest`: ids and colors, leaving, the member limit, name cleaning and when a room counts as
+  empty.
+- `RoomTest`, `RoomServiceTest`: join codes, removing empty boards (with a fake clock) and the room queue: tasks run in
+  order on one thread, and 20 people drawing into one stroke at the same time lose no points.
+- `BoardServiceTest`: joining, a board that does not exist and one that expired while someone was connected.
+- `DrawMessageTest`, `CursorMessageTest`: which messages are accepted.
+- `MessageCodecTest`: every message reads and writes with the type the page expects.
 - `OutboxTest`: messages go out in order, and a stalled client is closed without making the room wait.
 - `BoardSocketTest`: starts the app on a random port and talks to it with real WebSocket clients (JDK `HttpClient`):
-  two people drawing, a late joiner, undo and clear, members and cursors, locked boards, unknown boards and malformed
-  messages.
+  two people drawing, a late joiner, undo and clear, members and cursors, locked boards, unknown boards, malformed
+  messages and the cache header on the scripts.
 
 GitHub Actions runs the same build on every push.
 
 ## Project layout
 
-The code is organised by feature: each top-level package is one thing the app does, and holds everything that thing
-needs, from the model to the endpoint. A new feature gets its own package next to these.
+The code follows the usual Spring Boot layout: one package per feature, holding its controller, service and repository
+side by side, with the objects that go over the wire in `dto/request` and `dto/response`. A new feature gets its own
+package next to these.
 
 ```
 src/main/java/me/fertiz/syncboard
-    SyncBoardApplication        starts the app
-    room/                       rooms: creating, finding and expiring them, their strokes and members
-        dto/                    what the REST API takes and returns (CreateRoomRequest, RoomResponse)
-        Room, Member, Stroke    the state of one room
-        RoomService             keeps all rooms, removes empty ones
-        RoomController          POST /api/rooms, GET /api/rooms/{id}
-        RoomPageController      serves the board page at /r/{id}
-    board/                      drawing together live over WebSocket
-        message/                what the page and the server send each other (ClientMessage, ServerMessage)
-        BoardSocketHandler      joins people to rooms and passes changes on
-        Outbox                  one send queue per connection
-        SocketConfig            registers /ws/rooms/{id}
+    SyncBoardApplication            starts the app
+    room/                           creating, finding and expiring rooms
+        Room                        one room: its id, join code and task queue
+        RoomState                   what the queue protects: the drawing and the members
+        Drawing, Stroke             the lines on the board and their limits
+        RoomMembers, Member         who is in the room
+        RoomController              POST /api/rooms, GET /api/rooms/{id}
+        RoomPageController          serves the board page at /r/{id}
+        RoomService                 creates rooms, removes empty ones
+        RoomRepository              keeps the rooms in memory
+        RoomIdGenerator             random room ids
+        RoomProperties              the settings from application.yml
+        dto/request, dto/response   CreateRoomRequest, RoomResponse
+    board/                          drawing together live over WebSocket
+        BoardConnection             one connected page and its send queue (Outbox)
+        BoardSocketHandler          WebSocket events: opens connections, reads and checks messages
+        BoardService                what each message does to a room
+        BoardConnectionRepository   keeps the open connections
+        BoardBroadcaster            sends messages to the people in a room
+        CloseReason, MessageCodec   close codes, JSON in and out
+        BoardSocketConfig           registers /ws/rooms/{id}
+        dto/request, dto/response   one record per message in each direction
 src/main/resources/static
-    index.html, board.html      the home page and the board
-    js/                         home.js, board.js (drawing, sync, cursors), storage.js
-    css/                        style.css
+    index.html, board.html          the home page and the board
+    css/style.css
+    js/
+        home.js                     creates a board
+        board.js                    wires the board page together
+        join-dialog.js              asking for a name and the join code
+        people.js                   the list of people on the board
+        notices.js                  status, messages and the "board is gone" panel
+        socket.js                   the WebSocket and reconnecting
+        canvas.js                   the strokes on the canvas, drawn piece by piece
+        pen.js                      the stroke being drawn: sending points, undo
+        cursors.js                  other people's cursors
+        throttle.js, storage.js     small helpers
 ```
 
 Tests use the same packages. `BoardSocketTest` in the root package starts the whole app.

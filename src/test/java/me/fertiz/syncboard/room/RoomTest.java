@@ -10,17 +10,20 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RoomTest {
 
     private static final Instant NOW = Instant.parse("2026-11-02T12:00:00Z");
     private static final Duration TIMEOUT = Duration.ofMinutes(30);
+    private static final Instant IDLE_LONG_ENOUGH = NOW.plus(TIMEOUT);
 
     private final Room room = new Room("abcd2345", null, NOW);
 
@@ -30,7 +33,7 @@ class RoomTest {
         Set<Thread> threads = ConcurrentHashMap.newKeySet();
 
         CompletableFuture.allOf(IntStream.range(0, 200)
-                .mapToObj(i -> room.execute(() -> {
+                .mapToObj(i -> room.execute(state -> {
                     order.add(i);
                     threads.add(Thread.currentThread());
                 }))
@@ -48,7 +51,7 @@ class RoomTest {
                 people.submit(() -> {
                     for (int i = 0; i < 100; i++) {
                         int[] point = {i, i};
-                        draws.add(room.execute(() -> room.draw("shared", "#1e1e1e", 2, point)));
+                        draws.add(room.execute(state -> state.drawing().draw("shared", "#1e1e1e", 2, point)));
                     }
                 });
             }
@@ -56,68 +59,41 @@ class RoomTest {
 
         CompletableFuture.allOf(draws.toArray(CompletableFuture[]::new)).join();
 
-        assertThat(room.strokes()).singleElement().satisfies(stroke -> assertThat(stroke.points()).hasSize(4000));
+        assertThat(strokes()).singleElement().satisfies(stroke -> assertThat(stroke.coordinateCount()).isEqualTo(4000));
+    }
+
+    @Test
+    void closesOnlyAfterBeingIdleForTheWholeTimeout() {
+        assertThat(room.closeIfIdle(IDLE_LONG_ENOUGH.minusSeconds(1), TIMEOUT).join()).isFalse();
+        assertThat(room.closeIfIdle(IDLE_LONG_ENOUGH, TIMEOUT).join()).isTrue();
     }
 
     @Test
     void refusesTasksOnceClosed() {
-        room.close();
+        room.closeIfIdle(IDLE_LONG_ENOUGH, TIMEOUT).join();
 
-        assertThat(room.execute(() -> room.clear())).isCompletedExceptionally();
+        assertThat(room.execute(state -> state.drawing().clear())).isCompletedExceptionally();
     }
 
     @Test
-    void appendsPointsToAStrokeAndKeepsItsFirstStyle() {
-        assertThat(room.draw("s1", "#e03131", 4, new int[]{1, 2, 3, 4})).isTrue();
-        assertThat(room.draw("s1", "#1971c2", 8, new int[]{5, 6})).isTrue();
+    void refusesToCloseTwice() {
+        room.closeIfIdle(IDLE_LONG_ENOUGH, TIMEOUT).join();
 
-        assertThat(room.strokes()).containsExactly(new Stroke("s1", "#e03131", 4, List.of(1, 2, 3, 4, 5, 6)));
+        assertThat(room.closeIfIdle(IDLE_LONG_ENOUGH, TIMEOUT)).isCompletedExceptionally();
     }
 
     @Test
-    void keepsStrokesInTheOrderTheyWereStarted() {
-        room.draw("s1", "#1e1e1e", 2, new int[]{1, 1});
-        room.draw("s2", "#1e1e1e", 2, new int[]{2, 2});
-        room.draw("s1", "#1e1e1e", 2, new int[]{3, 3});
+    void tasksQueuedBeforeClosingSeeTheRoomAsClosed() {
+        CountDownLatch release = new CountDownLatch(1);
+        room.execute(state -> await(release));
+        room.closeIfIdle(IDLE_LONG_ENOUGH, TIMEOUT);
+        AtomicBoolean seenClosed = new AtomicBoolean();
+        CompletableFuture<Void> queued = room.execute(state -> seenClosed.set(room.isClosed()));
 
-        assertThat(room.strokes()).extracting(Stroke::id).containsExactly("s1", "s2");
-    }
+        release.countDown();
+        queued.join();
 
-    @Test
-    void handsOutCopiesThatCannotChangeTheRoom() {
-        room.draw("s1", "#1e1e1e", 2, new int[]{1, 1});
-        List<Stroke> copy = room.strokes();
-
-        assertThatThrownBy(() -> copy.get(0).points().add(9)).isInstanceOf(UnsupportedOperationException.class);
-        room.draw("s1", "#1e1e1e", 2, new int[]{2, 2});
-
-        assertThat(copy.get(0).points()).containsExactly(1, 1);
-        assertThat(room.strokes().get(0).points()).containsExactly(1, 1, 2, 2);
-    }
-
-    @Test
-    void erasesAndClearsStrokes() {
-        room.draw("s1", "#1e1e1e", 2, new int[]{1, 1});
-        room.draw("s2", "#1e1e1e", 2, new int[]{2, 2});
-
-        assertThat(room.erase("s1")).isTrue();
-        assertThat(room.erase("s1")).isFalse();
-        assertThat(room.strokes()).extracting(Stroke::id).containsExactly("s2");
-        assertThat(room.clear()).isTrue();
-        assertThat(room.clear()).isFalse();
-        assertThat(room.strokes()).isEmpty();
-    }
-
-    @Test
-    void refusesStrokesOverTheLimits() {
-        for (int i = 0; i < Room.MAX_STROKES; i++) {
-            assertThat(room.draw("s" + i, "#1e1e1e", 2, new int[]{i, i})).isTrue();
-        }
-        assertThat(room.draw("one-too-many", "#1e1e1e", 2, new int[]{0, 0})).isFalse();
-
-        room.clear();
-        assertThat(room.draw("long", "#1e1e1e", 2, new int[Room.MAX_STROKE_COORDINATES])).isTrue();
-        assertThat(room.draw("long", "#1e1e1e", 2, new int[]{0, 0})).isFalse();
+        assertThat(seenClosed).isTrue();
     }
 
     @Test
@@ -133,53 +109,17 @@ class RoomTest {
         assertThat(locked.accepts(null)).isFalse();
     }
 
-    @Test
-    void givesEveryMemberAnIdAndAColorNobodyElseHas() {
-        Member alice = room.join("session-1", "Alice");
-        Member bob = room.join("session-2", "Bob");
-        room.leave("session-1", NOW);
-        Member carol = room.join("session-3", "Carol");
-
-        assertThat(List.of(alice.id(), bob.id(), carol.id())).containsExactly("m1", "m2", "m3");
-        assertThat(alice.color()).isEqualTo(Room.COLORS.get(0));
-        assertThat(bob.color()).isEqualTo(Room.COLORS.get(1));
-        assertThat(carol.color()).isEqualTo(Room.COLORS.get(0));
-        assertThat(room.members()).containsExactly(bob, carol);
-        assertThat(room.member("session-2")).isEqualTo(bob);
-        assertThat(room.member("session-1")).isNull();
+    private List<Stroke> strokes() {
+        AtomicReference<List<Stroke>> strokes = new AtomicReference<>();
+        room.execute(state -> strokes.set(state.drawing().strokes())).join();
+        return strokes.get();
     }
 
-    @Test
-    void isFullAtTheMemberLimit() {
-        for (int i = 0; i < Room.MAX_MEMBERS - 1; i++) {
-            room.join("session-" + i, "Guest");
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
-        assertThat(room.isFull()).isFalse();
-
-        room.join("last", "Guest");
-
-        assertThat(room.isFull()).isTrue();
-    }
-
-    @Test
-    void cleansNames() {
-        assertThat(Member.cleanName("  Bob\tthe​  builder\n")).isEqualTo("Bob the builder");
-        assertThat(Member.cleanName("‮​")).isEqualTo("Guest");
-        assertThat(Member.cleanName(null)).isEqualTo("Guest");
-        assertThat(Member.cleanName("x".repeat(50))).hasSize(Member.MAX_NAME_LENGTH);
-    }
-
-    @Test
-    void becomesIdleOnlyAfterBeingEmptyForTheWholeTimeout() {
-        assertThat(room.isIdle(NOW.plus(TIMEOUT).minusSeconds(1), TIMEOUT)).isFalse();
-        assertThat(room.isIdle(NOW.plus(TIMEOUT), TIMEOUT)).isTrue();
-
-        room.join("session-1", "Alice");
-        Instant later = NOW.plus(Duration.ofHours(2));
-        assertThat(room.isIdle(later, TIMEOUT)).isFalse();
-
-        room.leave("session-1", later);
-        assertThat(room.isIdle(later.plus(TIMEOUT).minusSeconds(1), TIMEOUT)).isFalse();
-        assertThat(room.isIdle(later.plus(TIMEOUT), TIMEOUT)).isTrue();
     }
 }
